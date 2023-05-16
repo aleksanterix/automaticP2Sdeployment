@@ -1,0 +1,130 @@
+// This deployment template deploys a Point-To-Site VPN Gateway with a VNet and a GatewaySubnet.
+//! Overview
+// Virtual Network requirements: name, address space, and subnet names for main subnet and gateway subnet and location is set to resource group location.
+// Public IP address requirements: name, location, and allocation method is set to Dynamic.
+// Virtual network gateway requirements: name: gatewayName, type: VPN, VPN type: Route-based, SKU: VpnGw1, location: rg location, assign to earlier created vnet. Disable active-active mode and disable BGP.
+// Point to site configuration: address pool: 10.1.0.0/24, tunnel type: IKEv2, and root certificate.
+// The resources must be deployed in the exact order as shown in the template.
+
+// ! Template
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vpnClientRootCertName": {
+        "type": "string",
+        "metadata": {
+            "description": "This is the name of the VPN client root certificate. It's value will be passed by the PowerShell script."
+        }
+    },
+    "vpnClientRootCertPublicCertData": {
+        "type": "securestring",
+        "metadata": {
+            "description": "This is the public certificate data of the VPN client root certificate. It's value will be passed by the PowerShell script."
+        }
+    }
+  },
+  "functions": [],
+  "variables": {
+    "location": "[resourceGroup().location]",
+    //! Variables for VNET
+    "vnetName": "vpnVnet",
+    "vnetAddressSpace": "10.0.0.0/16",
+    "subnetConfig": [
+      {
+        "name": "MainSubnet",
+        "addressPrefix": "10.0.0.0/24"
+      },
+      {
+        "name": "GatewaySubnet",
+        "addressPrefix": "10.0.1.0/24"
+      }
+    ],
+    //! Variables for Public IP
+    "publicIPAddressName": "vpnPubIP",
+    //! Variables for VPN Gateway
+    "gatewayName": "vpnGW",
+    "gwSKU": "VpnGw1",
+    //! Variables for Point to Site
+    "vpnClientConfiguration": {
+        "vpnClientAddressPool": {
+            "addressPrefixes": [
+                "10.1.0.0/24"
+            ]
+        },
+        "vpnClientRootCertificates": [
+            {
+            "name": "[parameters('vpnClientRootCertName')]",
+            "publicCertData": "[parameters('vpnClientRootCertPublicCertData')]"
+            }
+        ],
+        "vpnClientProtocols": [
+            "IkeV2"
+        ]
+    }
+    },
+  "resources": [
+    //! VNET
+    {
+      "name": "[variables('vnetName')]",
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2022-07-01",
+      "location": "[variables('location')]",
+      "tags": {},
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": "[variables('vnetAddressSpace')]"
+        },
+        "subnets": "[variables('subnetConfig')]"
+      }
+    },
+    //! Public IP
+    {
+      "name": "[variables('publicIPAddressName')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "location": "[variables('location')]",
+      "tags": {},
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic"
+      }
+    },
+    //! VPN Gateway
+    {
+      "name": "[variables('gatewayName')]",
+      "type": "Microsoft.Network/virtualNetworkGateways",
+      "apiVersion": "2022-07-01",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "vnetGatewayConfig",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('subnetConfig')[1].name)]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+              }
+            }
+          }
+        ],
+        "sku": {
+          "name": "[variables('gwSKU')]",
+          "tier": "[variables('gwSKU')]"
+        },
+        "gatewayType": "Vpn",
+        "vpnType": "PolicyBased",
+        "enableBgp": false,
+        "activeActive": false,
+        "vpnClientConfiguration": "[variables('vpnClientConfiguration')]"
+      }
+    }
+  ],
+  "outputs": {}
+}
