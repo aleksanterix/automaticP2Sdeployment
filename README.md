@@ -1,17 +1,22 @@
-Azure Point-to-Site VPN Auto-Deployment
+# Azure Point-to-Site VPN Auto-Deployment
+
 This project provides a PowerShell script to automatically deploy Azure resources and setup a Point-to-Site (P2S) VPN connection. The script creates a Virtual Network (VNet), VPN Gateway, and a Public IP. Then, it configures a VPN connection from the local machine where the script is run.
 
-Prerequisites
+## Prerequisites
 Azure Subscription
 PowerShell version 7+
 Azure PowerShell module
-Resources Deployed
+
+## Resources Deployed
 The following resources are created by the script:
 
 Virtual Network (VNet)
 VPN Gateway
 Public IP
-The VNet has the following configurations:
+
+## Configurations
+
+### VNet configuration:
 
 ```json
 Copy code
@@ -29,6 +34,8 @@ Copy code
 "gwSKU": "VpnGw1",
 And, the VPN Client Configuration is as follows:
 ```
+
+### Gateway configuration
 
 ```json
 Copy code
@@ -50,7 +57,7 @@ Copy code
 }
 ```
 
-Usage
+### Usage
 Clone the repository:
 
 ```bash
@@ -74,8 +81,8 @@ Once the script completes the Azure resource deployment, download the VPN client
 
 Set up the VPN connection on your local machine using the downloaded configuration file.
 
-In Progress
+## In Progress
 Currently, the following steps are in progress:
 
-Automatic download of the VPN client configuration file.
-Automatic setup of the VPN connection based on the downloaded configuration file.
+- Automatic download of the VPN client configuration file.
+- Automatic setup of the VPN connection based on the downloaded configuration file.
