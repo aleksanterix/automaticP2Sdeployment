@@ -1,28 +1,22 @@
 # Overview: This script is used to automatically generate root certificates and client certificates for the VPN deployment, and then deploy the VPN gateway and VPN client VMs based on the ARM template.
 # We will use a self-signed root certificate to sign the client certificate, and then use the client certificate to connect to the VPN gateway.
-# The resource group is already created in Azure.
 
-# Tasks:
-# 1. Assign variables such as resource group name, location, client certificate name,
-# 2. Generate root certificate and client certificate, and export them to a file in the current directory
-# 3. Extract the public key from the client certificate to a variable
-# 4. Connect to Azure
-# 5. Deploy the ARM Template using the public key and location as parameters
-# 6. Download the VPN client configuration file to the current directory
-# 7. Connect to the VPN gateway using the VPN client configuration file
-
-#! Parameters
-
-# param (
-#     [Parameter(Mandatory=$true)]
-#     [string]$rg,
-#     [Parameter(Mandatory=$true)]
-#     [string]$location
-# )
 
 ###! Functions
 ##! Certificate functions
 # Get certificate thumbprint
+
+function Set-CertNames {
+    $certNames = @()
+    # Get the certificate name
+    $certNaming = Read-Host "Enter the name for the certificates"
+    # Make array of certificate names
+    $certNames += $certNaming + "RootCert"
+    $certNames += $certNaming + "ChildCert"
+
+    Write-Host ""
+    return $certNames
+}
 function Get-Cert-Thumbprint {
     param (
         $Subject
@@ -39,46 +33,88 @@ function Get-Cert-Path {
 
 # Check if the certificate exists by invoking the Get-Cert-Thumbprint command. If the value is null, the certificate does not exist.
 function Test-Cert-Exists {
-    $rootCertThumbprint = Get-Cert-Thumbprint $rootCertName
-    $certThumbprint = Get-Cert-Thumbprint $certName
+    Write-Host "Checking if the certificates already exist..."
 
-    Write-Host  $rootCertName
-    Write-Host  $certName
-    # Check if the root certificate exists
-    if ($null -eq $rootCertThumbprint -or $null -eq $certThumbprint) {
-        return $false
+    $existingCerts = @()
+    $certExists = $false
+
+    foreach ($certName in $certNames) {
+        $certThumbprint = Get-Cert-Thumbprint $certName
+        if ($null -eq $certThumbprint) {
+        } else {
+            $existingCerts += $certName
+            $certExists = $true
+        }
     }
-    else {
-        return $true
+
+    # If the array is empty, print that no certificates exist and return false. Otherwise, print the existing certificates and return true.
+
+    if ($certExists) {
+        Write-Host "The following certificates already exist:"
+        foreach ($cert in $existingCerts) {
+            Write-Host $cert
+        }
+    } else {
+        Write-Host "No overlapping certificates exist."
     }
+
+    # Check if the client certificate exists
+    if (!$certExists) {
+        Write-Host ""
+        Write-Host "Continuing..."
+        Write-Host ""
+    } else {
+        Write-Host ""
+        $answer = Read-Host "Would you like to delete them and create new ones? (y/n)"
+        if ($answer -eq "y") {
+            foreach($cert in $existingCerts) {
+                $certThumb = Get-Cert-Thumbprint $cert
+                $certPath = "Cert:\CurrentUser\My\" + $certThumb
+                Remove-Item -Path $certPath
+            }
+            Write-Host "Certificates deleted."
+        } else {
+            Write-Host "Please run the script again with a different certificate name."
+            Write-Host "Exiting..."
+            exit
+        }
+    }
+
 }
 
 # Generate root certificate and client certificate
 function New-Certificates {
     param ()
     # Generate root certificate
+    $rootSubject = "CN=" + $certNames[0]
     Write-Host "Generating root certificate..."
     $cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature `
-    -Subject "CN=$rootCertName" -KeyExportPolicy Exportable `
+    -Subject $rootSubject -KeyExportPolicy Exportable `
     -HashAlgorithm sha256 -KeyLength 2048 `
     -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign -KeyUsage CertSign
 
     # Generate client certificate signed by root certificate
+    $childSubject = "CN=" + $certNames[1]
     Write-Host "Generating client certificate..."
-    New-SelfSignedCertificate -Type Custom -DnsName $certName -KeySpec Signature `
-    -Subject "CN=$certName" -KeyExportPolicy Exportable `
+    New-SelfSignedCertificate -Type Custom -DnsName $childSubject -KeySpec Signature `
+    -Subject $childSubject -KeyExportPolicy Exportable `
     -HashAlgorithm sha256 -KeyLength 2048 `
     -CertStoreLocation "Cert:\CurrentUser\My" `
-    -Signer $cert -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.2")
+    -Signer $cert -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.2") > $null
+
+    Write-Host ""
+    Write-Host "Certificates generated."
+    Write-Host ""
 }
 # Export root certificate to a Base64 file
 function Set-CertificateToBase64File {
     param ()
+    $rootFile = $certNames[0] + ".cer"
     # Define the certificate path
-    $certThumbprint = Get-Cert-Thumbprint $rootCertName
+    $certThumbprint = Get-Cert-Thumbprint $certNames[0]
     $certPath = "Cert:\CurrentUser\My\$certThumbprint" 
-    $exportPath = Join-Path -Path $pwd -ChildPath "$rootCertName.cer"
-    $base64Cert = $rootCertName + '64' + '.cer'
+    $exportPath = Join-Path -Path $pwd -ChildPath $rootFile
+    $base64Cert = $certNames[0] + '64' + '.cer'
     $export64Path = Join-Path -Path $pwd -ChildPath $base64Cert
 
     # Export the root certificate to a file and convert it to base64
@@ -209,38 +245,16 @@ Write-Host "The script will then deploy the VPN gateway and VPN client VMs using
 Read-Host "Press Enter to continue..."
 Write-Host ""
 
-## Ask for values
-$certNaming = Read-Host "Enter the name for the certificates"
-$rootCertName = $certNaming + "RootCert"
-$certName = $certNaming + "ChildCert"
 
 # Check if a certificate with the same name exists. And ask if the user wants to delete the existing certificates
-$certExists = Test-Cert-Exists
 
-if (!$certExists) {
-    Write-Host "Certificate $rootCertName or $certName do not exist."
-    Write-Host "Continuing..."
-} else {
-    Write-Host "Certificate $rootCertName or $certName already exist."
-    $answer = Read-Host "Would you like to delete them? (y/n)"
-    if ($answer -eq "y") {
-        $rootThumb = Get-Cert-Thumbprint -Subject $rootCertName
-        $childThumb = Get-Cert-Thumbprint -Subject $certName
-        $rootPath = "Cert:\CurrentUser\My\" + $rootThumb
-        $childPath = "Cert:\CurrentUser\My\" + $childThumb
-        Write-Host "Deleting certificates..."
-        Remove-Item -Path $rootPath
-        Remove-Item -Path $childPath
-        Write-Host "Certificates deleted."
-    } else {
-        Write-Host "Exiting..."
-        exit
-    }
-}
+$certNames = Set-CertNames
 
-###! Certificate part !###
+Test-Cert-Exists
 
-# Generate root certificate and client certificate, and export them to a base64 file in the current directory then get the base64 string to a variable
+# ###! Certificate part !###
+
+# # Generate root certificate and client certificate, and export them to a base64 file in the current directory then get the base64 string to a variable
 
 New-Certificates
 
@@ -248,26 +262,30 @@ $export64Path = Set-CertificateToBase64File
 
 $CertString = Get-Cert-Base64String
 
+Write-Host "Certificate generation complete."
+Write-Host ""
+
 ##### Azure part #####
 
 Write-Host "Connecting to Azure..."
-Write-Host "You will be prompted to login to Azure."
 
 # Connect to Azure
 Connect-AzAccount
 
 # Set the subscription
-
 Set-ValueForSubscription
 
 # Get location for deployments
-
 $location = Set-ValueForLocation
 
 # Get resource group, or create it if it doesn't exist
-
 $rg = Set-ValueForResourceGroup
 
+
+## Ask names for the deployment resources
+$vnetName = Read-Host "Enter the name of the VNet you want to deploy"
+$publicIPName = Read-Host "Enter the name of the public IP you want to deploy"
+$gatewayName = Read-Host "Enter the name of the VPN gateway you want to deploy"
 
 
 #! Gather parameters for ARM Template deployment
@@ -275,6 +293,9 @@ $rg = Set-ValueForResourceGroup
 $parameters = @{
     "Location" = $location.Location
     "vpnClientRootCertPublicCertData" = $certString
+    "vnetName" = $vnetName
+    "gatewayName" = $gatewayName
+    "publicIPAddressName" = $publicIPName
 }
 
 #! Deploy ARM Template
