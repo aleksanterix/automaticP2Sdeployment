@@ -28,8 +28,9 @@ Copy code
 ],
 "gwSKU": "VpnGw1",
 And, the VPN Client Configuration is as follows:
+```
 
-json
+```json
 Copy code
 "vpnClientConfiguration": {
     "vpnClientAddressPool": {
@@ -48,22 +49,25 @@ Copy code
     ]
 }
 ```
+
 Usage
 Clone the repository:
 
-bash
-Copy code
-git clone https://github.com/your-repo-url
+```bash
+git clone https://github.com/aleksanterix/automaticP2Sdeployment.git
+```
 Navigate to the directory containing the script:
 
-bash
-Copy code
-cd path/to/the/script
+```bash
+cd automaticP2Sdeployment
+```
+
 Run the script run.ps1:
 
-powershell
-Copy code
+```powershell
 .\run.ps1
+```
+
 The script will prompt you to provide inputs as needed.
 
 Once the script completes the Azure resource deployment, download the VPN client configuration file from the Azure portal.
