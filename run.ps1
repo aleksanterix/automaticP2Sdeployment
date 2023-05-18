@@ -1,11 +1,12 @@
 # Overview: This script is used to automatically generate root certificates and client certificates for the VPN deployment, and then deploy the VPN gateway and VPN client VMs based on the ARM template.
-# We will use a self-signed root certificate to sign the client certificate, and then use the client certificate to connect to the VPN gateway.
+# We will use a self-signed root certificate to sign the client certificate, and upload the root certificate to Azure then use the client certificate to connect to the VPN gateway.
 
 
 ###! Functions
 ##! Certificate functions
 # Get certificate thumbprint
 
+# Set certificate names by taking in a user input and appending "RootCert" and "ChildCert" to the name
 function Set-CertNames {
     $certNames = @()
     # Get the certificate name
@@ -17,6 +18,8 @@ function Set-CertNames {
     Write-Host ""
     return $certNames
 }
+
+# Gets the thumbprint of the certificate by taking in the certificate name. This is needed for the certificate path.
 function Get-Cert-Thumbprint {
     param (
         $Subject
@@ -24,6 +27,7 @@ function Get-Cert-Thumbprint {
     return Get-ChildItem Cert:\CurrentUser\My\ | Where-Object -FilterScript { $_.Subject -eq "CN=$Subject"} | Select-Object -ExpandProperty Thumbprint
 }
 
+# Helper function to get the certificate path with the name of the certificate
 function Get-Cert-Path {
     param (
         $Subject
@@ -68,8 +72,7 @@ function Test-Cert-Exists {
         $answer = Read-Host "Would you like to delete them and create new ones? (y/n)"
         if ($answer -eq "y") {
             foreach($cert in $existingCerts) {
-                $certThumb = Get-Cert-Thumbprint $cert
-                $certPath = "Cert:\CurrentUser\My\" + $certThumb
+                $certPath = Get-Cert-Path $cert
                 Remove-Item -Path $certPath
             }
             Write-Host "Certificates deleted."
@@ -106,15 +109,15 @@ function New-Certificates {
     Write-Host "Certificates generated."
     Write-Host ""
 }
+
 # Export root certificate to a Base64 file
 function Set-CertificateToBase64File {
     param ()
     $rootFile = $certNames[0] + ".cer"
     # Define the certificate path
-    $certThumbprint = Get-Cert-Thumbprint $certNames[0]
-    $certPath = "Cert:\CurrentUser\My\$certThumbprint" 
+    $certPath = Get-Cert-Path $certNames[0] 
     $exportPath = Join-Path -Path $pwd -ChildPath $rootFile
-    $base64Cert = $certNames[0] + '64' + '.cer'
+    $base64Cert = $certNames[0] + '64.cer'
     $export64Path = Join-Path -Path $pwd -ChildPath $base64Cert
 
     # Export the root certificate to a file and convert it to base64
@@ -242,7 +245,7 @@ Write-Host ""
 Write-Host "After this is done and the certificates are generated, the script will authenticate with Azure."
 Write-Host "Then, the script will ask for you to select the subscription, location and resource group."
 Write-Host "The script will then deploy the VPN gateway and VPN client VMs using the ARM template."
-Read-Host "Press Enter to continue..."
+Read-Host "Press Enter to continue"
 Write-Host ""
 
 
