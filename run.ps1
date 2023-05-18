@@ -3,20 +3,45 @@
 
 
 ###! Functions
+
+##! Greetings
+
+function greetings {
+    Write-Host "Welcome to the VPN deployment script!"
+    Write-Host ""
+    Write-Host "This script will deploy resources based on the azuredeploy.json and download and execute the VPN client installer."
+    Write-Host ""
+    Write-Host "Please ensure that you have the following prerequisites:"
+    Write-Host "1. Az-Module for PowerShell installed"
+    Write-Host "2. PowerShell version 5.1 or above"
+    Write-Host "3. A valid Azure subscription"
+    Write-Host "4. A valid Azure AD user account with permissions to create resources in the subscription"
+    Write-Host "5. A valid Azure AD user account with permissions to download the VPN client configuration"
+    Write-Host "NOTICE: Running this script may incur charges on your Azure subscription as it will create resources."
+    Write-Host "The creator of this script is not responsible for any charges incurred."
+    Write-Host "Please continue at your own risk."
+    Write-Host ""
+    Read-Host "Press Enter to continue"
+}
+
 ##! Certificate functions
 # Get certificate thumbprint
-
 # Set certificate names by taking in a user input and appending "RootCert" and "ChildCert" to the name
 function Set-CertNames {
-    $certNames = @()
     # Get the certificate name
     $certNaming = Read-Host "Enter the name for the certificates"
     # Make array of certificate names
-    $certNames += $certNaming + "RootCert"
-    $certNames += $certNaming + "ChildCert"
+    $certificates = @{
+        root = @{
+            Name = $certNaming + "RootCert"
+        }
+        child = @{
+            Name = $certNaming + "ChildCert"
+        }
+    }
 
     Write-Host ""
-    return $certNames
+    return $certificates
 }
 
 # Gets the thumbprint of the certificate by taking in the certificate name. This is needed for the certificate path.
@@ -42,7 +67,7 @@ function Test-Cert-Exists {
     $existingCerts = @()
     $certExists = $false
 
-    foreach ($certName in $certNames) {
+    foreach ($certName in $certificates.Values.Name) {
         $certThumbprint = Get-Cert-Thumbprint $certName
         if ($null -eq $certThumbprint) {
         } else {
@@ -89,7 +114,7 @@ function Test-Cert-Exists {
 function New-Certificates {
     param ()
     # Generate root certificate
-    $rootSubject = "CN=" + $certNames[0]
+    $rootSubject = "CN=" + $certificates.root.Name
     Write-Host "Generating root certificate..."
     $cert = New-SelfSignedCertificate -Type Custom -KeySpec Signature `
     -Subject $rootSubject -KeyExportPolicy Exportable `
@@ -97,7 +122,7 @@ function New-Certificates {
     -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign -KeyUsage CertSign
 
     # Generate client certificate signed by root certificate
-    $childSubject = "CN=" + $certNames[1]
+    $childSubject = "CN=" + $certificates.child.Name
     Write-Host "Generating client certificate..."
     New-SelfSignedCertificate -Type Custom -DnsName $childSubject -KeySpec Signature `
     -Subject $childSubject -KeyExportPolicy Exportable `
@@ -113,11 +138,11 @@ function New-Certificates {
 # Export root certificate to a Base64 file
 function Set-CertificateToBase64File {
     param ()
-    $rootFile = $certNames[0] + ".cer"
+    $rootFile = $certificates.root.Name + ".cer"
     # Define the certificate path
-    $certPath = Get-Cert-Path $certNames[0] 
+    $certPath = Get-Cert-Path $certificates.root.Name 
     $exportPath = Join-Path -Path $pwd -ChildPath $rootFile
-    $base64Cert = $certNames[0] + '64.cer'
+    $base64Cert = $certificates.root.Name + '64.cer'
     $export64Path = Join-Path -Path $pwd -ChildPath $base64Cert
 
     # Export the root certificate to a file and convert it to base64
@@ -231,33 +256,75 @@ function Set-ValueForResourceGroup {
     }
     return $rg
 }
+function Get-DeploymentNames {
+    $deploymentNames = @{
+        VNet = @{
+            Name = Read-Host "Enter the name of the VNet"
+            Deployment = "VNet"
+        }
+        PublicIP = @{
+            Name = Read-Host "Enter the name of the public IP"
+            Deployment = "PublicIP"
+        } 
+        Gateway = @{
+            Name = Read-Host "Enter the name of the VPN gateway"
+            Deployment = "Gateway"
+        }
+    }
+
+    return $deploymentNames
+}
+function Get-VpnClientConfiguration {    
+    $output = ".\config.zip"
+    $gw = $deployments.Gateway.Name
+    #! Explanation: The process which is started in the lines below will be named after the Virtual Network, hence the $process variable is named $deployments.VNet.Name
+    $process = $deployments.VNet.Name
+    Write-Host ""
+    Write-Host "Getting VPN client configuration download link..."
+    Write-Host ""
+    $p2sVpnConfigDownloadLink =  Get-AzVpnClientConfiguration -ResourceGroupName "$rg" -Name "$gw"
+    Write-Host "VPN client configuration download link retrieved."
+    Write-Host ""
+    Write-Host "Downloading VPN client configuration..."
+    Invoke-WebRequest -Uri $p2sVpnConfigDownloadLink.VpnProfileSASUrl -OutFile $output
+    Write-Host ""
+    Write-Host "VPN client configuration downloaded succesfully!"
+    Write-Host ""
+    Write-Host "Extracting VPN client configuration..."
+    Expand-Archive -Path $output -DestinationPath .\config
+    Write-Host "Extraction complete."
+    Write-Host ""
+    Write-Host "Cleaning up..."
+    Remove-Item $output
+    
+    Write-Host ""
+    Read-Host "This will now start the VPN client. Please allow the program to make changes to your computer. Press any Enter to continue."
+
+    $file = Get-ChildItem -Path .\config\WindowsAmd64 -Filter *.exe 
+    Start-Process -Path $file -Wait
+    Write-Host ""
+    # Wait until the VPN client is closed
+    Write-Host "VPN client closed. The script will now continue."
+    Write-Host "NOTICE: The script doesn't check if the VPN client was succesfully installed. If the VPN client was not installed, please install it manually."
+    Write-Host ""
+    Write-Host ""
+}
 
 #####! Main script !#####
 
 ## Greeting and instructions
-Write-Host "Welcome to the VPN deployment script."
-Write-Host "This script will generate root and client certificates, deploy the VPN gateway and VPN client VMs, and connect to the VPN gateway."
-Write-Host "Please follow the instructions."
-Write-Host ""
-Write-Host "First, I need you to give a name that will be used to generate the names for the certificates. Please enter a unique name for the certificates."
-Write-Host "For example, if you enter 'test', the root certificate will be named 'testRootCert' and the client certificate will be named 'testChildCert'."
-Write-Host ""
-Write-Host "After this is done and the certificates are generated, the script will authenticate with Azure."
-Write-Host "Then, the script will ask for you to select the subscription, location and resource group."
-Write-Host "The script will then deploy the VPN gateway and VPN client VMs using the ARM template."
-Read-Host "Press Enter to continue"
-Write-Host ""
 
+greetings
 
 # Check if a certificate with the same name exists. And ask if the user wants to delete the existing certificates
 
-$certNames = Set-CertNames
+$certificates = Set-CertNames
 
 Test-Cert-Exists
 
 # ###! Certificate part !###
 
-# # Generate root certificate and client certificate, and export them to a base64 file in the current directory then get the base64 string to a variable
+# Generate root certificate and client certificate, and export them to a base64 file in the current directory then get the base64 string to a variable
 
 New-Certificates
 
@@ -265,12 +332,13 @@ $export64Path = Set-CertificateToBase64File
 
 $CertString = Get-Cert-Base64String
 
+Write-Host ""
 Write-Host "Certificate generation complete."
 Write-Host ""
 
 ##### Azure part #####
 
-Write-Host "Connecting to Azure..."
+# Write-Host "Connecting to Azure..."
 
 # Connect to Azure
 Connect-AzAccount
@@ -286,23 +354,30 @@ $rg = Set-ValueForResourceGroup
 
 
 ## Ask names for the deployment resources
-$vnetName = Read-Host "Enter the name of the VNet you want to deploy"
-$publicIPName = Read-Host "Enter the name of the public IP you want to deploy"
-$gatewayName = Read-Host "Enter the name of the VPN gateway you want to deploy"
 
+$deployments = Get-DeploymentNames
+
+Write-Host ""
+Write-Host "Deployment names set successfully."
+Write-Host ""
 
 #! Gather parameters for ARM Template deployment
 
 $parameters = @{
     "Location" = $location.Location
     "vpnClientRootCertPublicCertData" = $certString
-    "vnetName" = $vnetName
-    "gatewayName" = $gatewayName
-    "publicIPAddressName" = $publicIPName
+    "vnetName" = $deployments.VNet.Name
+    "publicIPAddressName" = $deployments.PublicIP.Name
+    "gatewayName" = $deployments.Gateway.Name
 }
+
 
 #! Deploy ARM Template
 
 Read-Host "We will now deploy the ARM Template. Press Enter to continue or CTRL+C to cancel"
 
 # New-AzResourceGroupDeployment -ResourceGroupName "$rg" -TemplateParameterObject $parameters
+
+#! Download VPN client configuration, unzip it and start the VPN installer.
+
+$vpnConfig = Get-VpnClientConfiguration
